@@ -1,7 +1,8 @@
 import torch.nn as nn
 import torch
 
-from marl_dta.model import linear_sequential
+from path_prediction.model import linear_sequential
+
 class PathPrediction(nn.Module):
     '''
         路径选择模块

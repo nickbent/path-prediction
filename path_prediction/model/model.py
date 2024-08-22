@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import dgl
 
-from marl_dta.model.edge import EdgeEmbedding
-from marl_dta.model.path import InnerPathModel, InterPathModel, GATConv, PathLearningProjection
-from marl_dta.model.dynamics import PathPrediction, DUEPrediction, ForwardPrediction
+from path_prediction.model.edge import EdgeEmbedding
+from path_prediction.model.path import InnerPathModel, InterPathModel, GATConv, PathLearningProjection
+from path_prediction.model.dynamics import PathPrediction, DUEPrediction, ForwardPrediction
 
 class DynamicsTraffModel(nn.Module):
     def __init__(self, 

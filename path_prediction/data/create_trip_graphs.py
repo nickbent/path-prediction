@@ -10,8 +10,8 @@ import dgl
 from sklearn import preprocessing
 from dgl import save_graphs, load_graphs
 
-from marl_dta.data import  json_loads_tuple_keys, load_dict
-from marl_dta.data.convert_sumo_data import *
+from path_prediction.data import  json_loads_tuple_keys, load_dict
+from path_prediction.data.convert_sumo_data import *
 
 NODE_DICT_FILENAME = "edges.json"
 PATH_DICT_FILENAME = "paths.json"

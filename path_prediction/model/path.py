@@ -7,7 +7,7 @@ import dgl.function as fn
 from dgl.utils import expand_as_pair
 import dgl.function as fn
 
-from marl_dta.model import linear_sequential
+from path_prediction.model import linear_sequential
 
 class InnerPathModel(nn.Module):
     def __init__(self,
