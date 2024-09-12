@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+import torch.nn.functional as F
 
 from path_prediction.model import linear_sequential
 
@@ -7,18 +8,29 @@ class PathPrediction(nn.Module):
     '''
         路径选择模块
     '''
-    def __init__(self, projection_dim, path_embedding_dim, hidden_sizes, relu_last = True, layer_norm = False):
+    def __init__(self, projection_dim, path_embedding_dim, hidden_sizes, layer_norm = False):
         super(PathPrediction, self).__init__()
         self.projection_dim = projection_dim
         self.path_embedding_dim = path_embedding_dim
+        self.num_paths = 24
 
-        sizes = [projection_dim*2] + hidden_sizes + [path_embedding_dim]
-        self.linear = linear_sequential(sizes, relu_last=relu_last, layer_norm=layer_norm)
+        sizes = [self.num_paths*projection_dim*2] + hidden_sizes + [path_embedding_dim]
+        self.linear = linear_sequential(sizes, relu_last=False, layer_norm=layer_norm)
+        # self.linear_add = nn.Linear(in_features = self.projection_dim*2,
+        #                           out_features = self.path_embedding_dim,
+        #                           bias = False)
+
 
     def forward(self, embed_1, embed_2):
 
+        embed_1 = embed_1.view(-1, self.num_paths*self.projection_dim)
+        embed_2 = embed_2.view(-1, self.num_paths*self.projection_dim)        
+
         embed = torch.concat((embed_1, embed_2), dim=1)
-        return self.linear(embed)
+        pred = self.linear(embed)
+        # b = self.linear_add(pred)
+        # pred = F.relu(pred+b)
+        return pred
     
 
 

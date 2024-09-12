@@ -31,7 +31,7 @@ class InnerPathModel(nn.Module):
                           bidirectional=True)
 
     def forward(self, seq, lengths):
-        package = pack_padded_sequence(seq,lengths,batch_first=True,enforce_sorted=False)
+        package = pack_padded_sequence(seq,lengths.cpu(),batch_first=True,enforce_sorted=False)
         results, _ = self.gru(package)
         outputs, lens = pad_packed_sequence(results,
                                             batch_first=True,total_length=seq.shape[1])
@@ -99,26 +99,35 @@ class PathEncoder(nn.Module):
 
 class GATConv(nn.Module):
 
-    def __init__(self, in_feats, out_feats, num_heads, seq_max_len):
+    def __init__(self, in_feats, out_feats, hidden_size, num_heads, seq_max_len):
         super(GATConv, self).__init__()
         self.num_heads = num_heads
         self.out_feats = out_feats
 
 
-        self.gatconv = dglnn.GATConv(in_feats=in_feats,
+        self.gatconv_1 = dglnn.GATConv(in_feats=in_feats,
+                                     out_feats=hidden_size,
+                                     num_heads=num_heads,
+                                     allow_zero_in_degree=True)
+
+
+        self.gatconv_2 = dglnn.GATConv(in_feats=hidden_size*num_heads,
                                      out_feats=out_feats,
                                      num_heads=num_heads,
                                      allow_zero_in_degree=True)
 
 
 
+
     def forward(self, graph):
         g_sub = dgl.metapath_reachable_graph(graph, ['select-', 'select+'])
         routeLearningEmbed = g_sub.ndata['embedding'].to(torch.float32)
+        input_shape = routeLearningEmbed.shape
 
         # 1.获取路径选择表示
         g_sub = dgl.add_self_loop(g_sub)
-        gatEmb = self.gatconv(g_sub, routeLearningEmbed)
+        gatEmb = self.gatconv_1(g_sub, routeLearningEmbed)
+        gatEmb = self.gatconv_2(g_sub, gatEmb.view(input_shape[0], input_shape[1], -1 ))
         return gatEmb
 
 
@@ -130,12 +139,44 @@ class PathLearningProjection(nn.Module):
         self.seq_max_len = seq_max_len
         self.num_paths = num_paths
 
-        sizes = [num_paths*in_feats * num_heads* seq_max_len] + hidden_sizes + [projection_dim]
+        sizes = [in_feats * num_heads* seq_max_len] + hidden_sizes + [projection_dim]
         self.linear = linear_sequential(sizes, relu_last=relu_last, layer_norm=layer_norm)
 
     def forward(self, gatEmbed):
 
-        embed = gatEmbed.view(-1, self.num_paths*self.in_feats * self.num_heads *self.seq_max_len)
+        embed = gatEmbed.view(-1, self.in_feats * self.num_heads *self.seq_max_len)
         return self.linear(embed)
-    
+
+class TemporalProjection(nn.Module):
+
+    def __init__(self, in_size, num_paths, window_width, hidden_size, num_layers):
+        super(TemporalProjection, self).__init__()
+        self.in_size = in_size
+        self.num_paths = num_paths
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.window_width = window_width
+        self.gru = nn.GRU(input_size=self.in_size * self.num_paths,
+                          hidden_size=self.hidden_size,
+                          num_layers=self.num_layers,
+                          batch_first=True)
+        self.relu = nn.ReLU()
+        self.norm = nn.LayerNorm(hidden_size)
+
+    def forward(self, path_gat_projection):
+        out, _ = self.gru(path_gat_projection.view(-1, self.window_width, self.in_size*self.num_paths))
+        return self.norm(self.relu(out[:,-1,:]))
+
+
+class PathProjection(nn.Module):
+
+  def __init__(self, num_paths, projection_dim):
+      super(PathProjection, self).__init__()
+
+      self.linear = nn.Linear(num_paths, projection_dim)
+
+  def forward(self, paths):
+
+      return self.linear(paths)
+
     

@@ -5,7 +5,7 @@ def linear_block( in_size, out_size, relu = True, layer_norm = False):
     linear = [nn.Linear(in_size, out_size)]
 
     if relu:
-        linear.append(nn.ReLU())
+        linear.append(nn.LeakyReLU(negative_slope=0.2))
     if layer_norm:
         linear.append(nn.LayerNorm(out_size))
     

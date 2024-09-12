@@ -3,7 +3,7 @@ import torch.nn as nn
 import dgl
 
 from path_prediction.model.edge import EdgeEmbedding
-from path_prediction.model.path import InnerPathModel, InterPathModel, GATConv, PathLearningProjection
+from path_prediction.model.path import InnerPathModel, InterPathModel, GATConv, PathLearningProjection, TemporalProjection, PathProjection
 from path_prediction.model.dynamics import PathPrediction, DUEPrediction, ForwardPrediction
 
 class DynamicsTraffModel(nn.Module):
@@ -73,6 +73,7 @@ class DynamicsTraffModel(nn.Module):
 
         self.gat_conv = GATConv(in_feats=self.inner_path_hidden_size * 2,
                                 out_feats=self.gat_conv_out_feats,
+                                hidden_size = self.gat_conv_hidden_size,
                                 num_heads=self.num_heads,
                                 seq_max_len=self.seq_max_len)
         
@@ -83,14 +84,27 @@ class DynamicsTraffModel(nn.Module):
                                                   projection_dim=self.route_learning_projection_dim,
                                                   hidden_sizes=self.path_learning_hidden_sizes)
 
-        self.action_prediction = PathPrediction(projection_dim=self.route_learning_projection_dim, 
-                                                  path_embedding_dim=self.num_paths,
-                                                  hidden_sizes=self.path_prediction_hidden_sizes) 
+        self.temporal_projection = TemporalProjection(in_size = self.route_learning_projection_dim,
+                                                      num_paths = self.num_paths,
+                                                      window_width = self.window_width,
+                                                      hidden_size = self.gru_hidden_size,
+                                                      num_layers = self.gru_num_layers)                          
+
+        self.action_prediction = PathPrediction(
+                                                  projection_dim=self.route_learning_projection_dim,#self.gru_hidden_size, 
+                                                  path_embedding_dim=self.projection_dim,#self.num_paths,
+                                                  hidden_sizes=self.path_prediction_hidden_sizes,
+                                                  layer_norm = self.prediction_layer_norm ) 
         # IF NUM PATHS IS BIG THEN MAYBE BETTER TO DO ACTION ENCODING
         #self.action_encoder = ActionEncoder(self.num_paths, self.window_width)
-        self.due_prediction = DUEPrediction(projection_dim=self.route_learning_projection_dim, 
-                                            path_embedding_dim=self.num_paths,
-                                            hidden_sizes=self.due_prediction_hidden_sizes) 
+        self.due_prediction = DUEPrediction(
+                                            projection_dim=self.route_learning_projection_dim,#self.gru_hidden_size, 
+                                            path_embedding_dim=self.projection_dim,#self.num_paths,
+                                            hidden_sizes=self.due_prediction_hidden_sizes,
+                                            layer_norm = self.prediction_layer_norm)
+        
+        self.action_encoding =  PathProjection(num_paths = self.num_paths,
+                                               projection_dim = self.projection_dim )
 
 
     def _init_forward(self):
@@ -254,11 +268,15 @@ class PredPathModel(DynamicsTraffModel):
                  inner_path_hidden_size ,
                  inner_path_num_layers,
                  gat_conv_out_feats ,
+                 gat_conv_hidden_size,
                  num_heads, 
                  route_learning_projection_dim ,
                  path_learning_hidden_sizes,
+                 gru_hidden_size,
+                 gru_num_layers,
                  path_prediction_hidden_sizes,
-                 due_prediction_hidden_sizes, 
+                 due_prediction_hidden_sizes,
+                 prediction_layer_norm,  
                  forward_prediction_hidden_size, 
                  project = True
                  ):
@@ -276,12 +294,16 @@ class PredPathModel(DynamicsTraffModel):
         self.inner_path_hidden_size = inner_path_hidden_size
         self.inner_path_num_layers = inner_path_num_layers
         self.gat_conv_out_feats = gat_conv_out_feats
+        self.gat_conv_hidden_size = gat_conv_hidden_size
         self.num_heads = num_heads
         self.route_learning_projection_dim = route_learning_projection_dim
         self.path_learning_hidden_sizes = path_learning_hidden_sizes
+        self.gru_hidden_size = gru_hidden_size
+        self.gru_num_layers = gru_num_layers
         self.forward_prediction_hidden_size = forward_prediction_hidden_size
         self.path_prediction_hidden_sizes = path_prediction_hidden_sizes
         self.due_prediction_hidden_sizes = due_prediction_hidden_sizes
+        self.prediction_layer_norm = prediction_layer_norm
         self.project = project
 
         self._init()
@@ -290,16 +312,26 @@ class PredPathModel(DynamicsTraffModel):
     def forward(self, online_graph, target_graph):
 
         batch_size = int(len(online_graph.batch_num_nodes("segment"))/self.window_width)
+
         _ = self.embed_paths(online_graph)
         _ = self.embed_paths(target_graph)
         path_online_gat_embedding = self.gat_conv(online_graph)
         path_target_gat_embedding = self.gat_conv(target_graph)
+        # ADD NOISE?
         path_online_gat_projection = self.route_projection(path_online_gat_embedding)
         path_target_gat_projection = self.route_projection(path_target_gat_embedding)
-        
-        action_prediction = self.action_prediction(path_online_gat_projection, path_target_gat_projection)
+        # path_target_gat_projection = torch.cat([path_online_gat_projection[batch_size*self.num_paths:,:], path_target_gat_projection])
 
-        return action_prediction
+        # path_online_projection = self.temporal_projection(path_online_gat_projection)
+        # path_target_projection = self.temporal_projection(path_target_gat_projection)
+
+        action_prediction = self.action_prediction(path_online_gat_projection, path_target_gat_projection)
+        cost_prediction = self.due_prediction(path_online_gat_projection)
+
+        actions = target_graph.nodes['path'].data['pathNum'].reshape(batch_size,  self.num_paths)
+        action_encoding = self.action_encoding(actions)
+
+        return action_prediction, cost_prediction, action_encoding
     
 
 
